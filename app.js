@@ -4,11 +4,13 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const ejs = require("ejs");
 const mongoose = require('mongoose');
-const bcrypt = require('bcrypt');
-const saltRounds = 10;
+const session = require('express-session');
+const passport = require('passport');
+const passportLocalMongoose = require('passport-local-mongoose');
+
+
 
 const app = express();
-
 
 app.set('view engine', 'ejs');
 
@@ -17,6 +19,18 @@ app.use(bodyParser.urlencoded({
 }));
 app.use(express.static("public"));
 
+//initial configuration of session
+app.use(session({
+    secret:"Our little secret.",
+    resave:false,
+    saveUninitialized:false
+}));
+
+app.use(passport.initialize());
+app.use(passport.session());
+
+//this is need to handel error of passportLocalMongoose package
+mongoose.set('useCreateIndex', true);
 // connect mongoDB 
 mongoose.connect('mongodb://localhost/userDB', {useNewUrlParser: true,useUnifiedTopology: true});
 
@@ -26,9 +40,17 @@ const userSchema = new mongoose.Schema({
     password:String
 });
 
+userSchema.plugin(passportLocalMongoose);
 
 //user Model
 const User = new mongoose.model("User",userSchema);
+
+
+// set up passpot module
+passport.use(User.createStrategy());
+ //set up serialize and deserialize 
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
 
 app.get("/",function(req,res){
     res.render("home");
@@ -42,54 +64,60 @@ app.get("/register",function(req,res){
     res.render("register");
 });
 
+app.get("/secrets",function(req,res){
+    if (req.isAuthenticated()) {
+        res.render("secrets");
+    } else {
+        res.redirect("/login");
+    }
+});
+
+app.get("/logout",function(req,res){
+    //here we deaurthenticate user and redirect home page
+    req.logOut();
+    res.redirect("/");
+
+});
+
 // register user using post route
 app.post("/register",function(req,res){
-
-    const username = req.body.username;
-    const password = req.body.password;
-
-    //use bcrypt encription
-    bcrypt.hash(password, saltRounds, function(err, hash) {//add salt and generate a hash 
-        const newUser = new User({
-            email:username,
-            password:hash//we saved salted hash as a password
+    //register user using pasport module
+  User.register({username:req.body.username},req.body.password,function(err,user){
+    if (err) {
+        console.log(err);
+        res.redirect("/register");
+    }else{
+        //here we aurthenticate newly create user and redirect secret page
+        //and also crate a local cookie
+        passport.authenticate("local")(req,res,function(){
+            res.redirect("/secrets");
         });
-        newUser.save(function(err){
-            if (!err) {
-                res.render("secrets");
-            } else {
-                console.log(err);
-            }
-        });
-            
-    });
-  
+    }
+  });
 });
 
 //login user using post route
 app.post("/login",function(req,res){
-    const username = req.body.username;
-    const password = req.body.password;
-        
-    User.findOne(
-    {
-        email:username
-    },
-    function(err,foundUser){
-        if (!err) {
-            if (foundUser) {
-                bcrypt.compare(password, foundUser.password, function(err, result) {//compare curren password with previous hash
-                    if (result) {
-                        res.render("secrets");
-                    }else{
-                        res.redirect("/login");
-                    }
-                });
-            }
+//collect user login credentials 
+//here we not use email because we use username key when register using pasport 
+    const user = new User({
+        username:req.body.username,
+        password:req.body.password
+    });
+
+    //we use logIn method and pass credentials and aurthenticate user and
+    //redirect secrets page and also store cookie
+    req.logIn(user,function(err){
+        if (err) {
+            console.log(err);
+            res.redirect("/login");
         } else {
-           console.log(err); 
+            passport.authenticate("local")(req,res,function(){
+                res.redirect("/secrets");
+            });
         }
     });
+   
 });
 
 
