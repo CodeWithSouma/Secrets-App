@@ -4,7 +4,8 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const ejs = require("ejs");
 const mongoose = require('mongoose');
-const md5 = require('md5');
+const bcrypt = require('bcrypt');
+const saltRounds = 10;
 
 const app = express();
 
@@ -43,25 +44,32 @@ app.get("/register",function(req,res){
 
 // register user using post route
 app.post("/register",function(req,res){
+
     const username = req.body.username;
-    const password = md5(req.body.password);//turn into hash
-    const newUser = new User({
-        email:username,
-        password:password
+    const password = req.body.password;
+
+    //use bcrypt encription
+    bcrypt.hash(password, saltRounds, function(err, hash) {//add salt and generate a hash 
+        const newUser = new User({
+            email:username,
+            password:hash//we saved salted hash as a password
+        });
+        newUser.save(function(err){
+            if (!err) {
+                res.render("secrets");
+            } else {
+                console.log(err);
+            }
+        });
+            
     });
-    newUser.save(function(err){
-        if (!err) {
-            res.render("secrets");
-        } else {
-            console.log(err);
-        }
-    });
+  
 });
 
 //login user using post route
 app.post("/login",function(req,res){
     const username = req.body.username;
-    const password = md5(req.body.password);//turn the password into hash
+    const password = req.body.password;
         
     User.findOne(
     {
@@ -69,10 +77,14 @@ app.post("/login",function(req,res){
     },
     function(err,foundUser){
         if (!err) {
-            if (foundUser.password === password) {
-                res.render("secrets");
-            }else{
-                res.redirect("/login");
+            if (foundUser) {
+                bcrypt.compare(password, foundUser.password, function(err, result) {//compare curren password with previous hash
+                    if (result) {
+                        res.render("secrets");
+                    }else{
+                        res.redirect("/login");
+                    }
+                });
             }
         } else {
            console.log(err); 
